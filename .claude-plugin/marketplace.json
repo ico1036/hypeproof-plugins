@@ -1,0 +1,29 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace-schema.json",
+  "name": "hypeproof",
+  "owner": {
+    "name": "HypeProof Studio",
+    "url": "https://github.com/ico1036"
+  },
+  "description": "HypeProof Studio internal Claude Code plugins",
+  "version": "1.0.0",
+  "plugins": [
+    {
+      "name": "hain7-skills",
+      "displayName": "HAIN7 Studio Skills",
+      "description": "아동 7역량 관찰 리포트: 세션 채점(hain7-report) + Supabase 배치(hain7-batch)",
+      "version": "1.0.0",
+      "author": {
+        "name": "HypeProof Studio"
+      },
+      "source": "./plugins/hain7-skills",
+      "license": "Proprietary (fonts: OFL)",
+      "keywords": [
+        "hain7",
+        "education",
+        "report",
+        "supabase"
+      ]
+    }
+  ]
+}

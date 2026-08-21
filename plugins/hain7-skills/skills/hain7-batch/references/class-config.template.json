@@ -1,0 +1,24 @@
+{
+  "_설명": "반 1개당 1파일: {HAIN7_BATCH_HOME}/config/{class_id}.json 로 저장. 서면 동의를 실제로 접수한 뒤에만 privacy를 채울 것 — 이 파일은 동의의 '기록'이지 생성이 아니다.",
+  "class_id": "sk-biopharm-2026-a",
+  "lesson_title": "게임 만들기",
+  "curriculum_id": "sk-biopharm-kids-2026",
+  "task_version": "s1",
+  "language": "ko",
+  "privacy": {
+    "consent_method": "written",
+    "guardian_consent_verified": true,
+    "guardian_consent_verified_at": "2026-08-20T09:00:00+09:00",
+    "child_notice_version": "child-notice-2026-08",
+    "purpose": "lesson_feedback",
+    "correction_contact": "classroom-admin@example.com"
+  },
+  "students": {
+    "SK56-EXAMPL-01": {
+      "age": 12
+    },
+    "SK56-EXAMPL-02": {
+      "age": 11
+    }
+  }
+}

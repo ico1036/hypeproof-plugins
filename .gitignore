@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.DS_Store
+# 실데이터·동의기록·산출물은 절대 커밋 금지 (HAIN7_BATCH_HOME에만 존재해야 함)
+**/mirror/
+**/out/
+**/reviews/
+**/config/*.json
+!**/references/*.json
+*.pdf
+analysis*.json

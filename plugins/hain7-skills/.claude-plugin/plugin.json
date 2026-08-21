@@ -1,0 +1,8 @@
+{
+  "name": "hain7-skills",
+  "description": "HAIN7 아동 7역량 관찰 리포트 — 세션 채점·PDF/HTML 렌더 + Supabase 학생별 배치",
+  "version": "1.0.0",
+  "author": {
+    "name": "HypeProof Studio"
+  }
+}

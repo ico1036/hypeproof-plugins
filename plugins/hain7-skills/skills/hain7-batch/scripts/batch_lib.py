@@ -63,6 +63,23 @@ def batch_home() -> Path:
     return Path(os.environ.get("HAIN7_BATCH_HOME", "~/HypeProof/hain7-batch")).expanduser()
 
 
+def link_dir() -> str:
+    """Directory prepared with `supabase link`. Supabase CLI >= 2.10x resolves the target
+    project from a linked workdir; storage subcommands no longer accept --project-ref."""
+    env = os.environ.get("HAIN7_SUPABASE_WORKDIR")
+    return str(Path(env).expanduser() if env else batch_home() / "link")
+
+
+def linked_ref(workdir: str) -> str | None:
+    """Project ref that `supabase link` recorded in workdir, or None when unlinked."""
+    try:
+        return (Path(workdir) / "supabase" / ".temp" / "project-ref").read_text(
+            encoding="utf-8"
+        ).strip() or None
+    except OSError:
+        return None
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 

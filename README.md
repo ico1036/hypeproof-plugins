@@ -17,6 +17,10 @@ Supabase 접근 준비 (최초 1회, **실제 터미널에서**):
 # supabase CLI 설치 (macOS)
 curl -sL https://github.com/supabase/cli/releases/latest/download/supabase_darwin_arm64.tar.gz | tar xz && sudo mv supabase /usr/local/bin/
 supabase login   # 브라우저 인증 — HypeProof Supabase org 멤버여야 접근됨
+
+# 프로젝트 링크 (CLI v2.10x 이상은 storage 명령이 --project-ref 를 받지 않음)
+mkdir -p ~/HypeProof/hain7-batch/link && cd ~/HypeProof/hain7-batch/link
+supabase init && supabase link --project-ref etmdeixjzstwhoqrgxfo
 ```
 
 끝. 이후 Claude Code에서:
@@ -26,7 +30,7 @@ supabase login   # 브라우저 인증 — HypeProof Supabase org 멤버여야 �
 오늘 명부만 확인해줘      # dry-run
 ```
 
-프로젝트 ref는 플러그인에 기본값으로 들어 있어(시크릿 아님 — 권한은 org 멤버십과 본인 로그인이 통제) 추가 설정이 필요 없습니다. 다른 프로젝트를 쓰려면 `HAIN7_SUPABASE_REF` 환경변수로 덮어씁니다.
+프로젝트 ref는 플러그인에 기본값으로 들어 있어(시크릿 아님 — 권한은 org 멤버십과 본인 로그인이 통제) 추가 설정이 필요 없습니다. 다른 프로젝트를 쓰려면 `HAIN7_SUPABASE_REF` 로 ref를, 링크 디렉터리를 옮겼다면 `HAIN7_SUPABASE_WORKDIR` 로 그 경로를 지정합니다. 둘이 가리키는 프로젝트가 다르면 배치는 pull 전에 멈춥니다 — 오래된 링크가 다른 반 아동 데이터를 조용히 끌어오는 것을 막는 게이트입니다.
 
 ## 구성
 

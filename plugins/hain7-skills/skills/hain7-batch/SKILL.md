@@ -20,7 +20,8 @@ LLM은 숫자·아동용 문구·차트에 손대지 않는다. 리뷰 JSON은 L
 ## 요구사항 (공유 설치)
 
 - `hain7-report` 스킬이 같은 `skills/` 아래(또는 `HAIN7_REPORT_DIR`) 설치
-- `supabase` CLI 설치 + 실제 터미널에서 `supabase login` 1회
+- `supabase` CLI 설치 + 실제 터미널에서 `supabase login` 1회, 그리고 링크 1회
+  — `HAIN7_SUPABASE_WORKDIR`(기본 `{HAIN7_BATCH_HOME}/link`)에서 `supabase init && supabase link --project-ref <REF>`
 - python3. PDF는 ReportLab 있는 런타임에서만(없으면 HTML까지 생성하고 사유 기록)
 - 작업 루트: `HAIN7_BATCH_HOME` (기본 `~/HypeProof/hain7-batch/`) — `mirror/ merged/ out/ config/ reviews/`
 

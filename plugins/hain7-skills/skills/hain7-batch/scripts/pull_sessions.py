@@ -16,13 +16,35 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from batch_lib import BatchError, batch_home, run_cli, verify_manifest  # noqa: E402
+from batch_lib import (  # noqa: E402
+    BatchError, batch_home, link_dir, linked_ref, run_cli, verify_manifest,
+)
+
+
+def linked_flags(project_ref: str) -> list[str]:
+    """Storage subcommands take the project from a linked workdir, not --project-ref.
+    Assert the link points where the caller asked: a stale link would otherwise pull
+    another class's children into this mirror without a word."""
+    workdir = link_dir()
+    actual = linked_ref(workdir)
+    if actual is None:
+        raise BatchError(
+            f"{workdir} 가 링크되지 않았습니다. 실제 터미널에서 1회 실행하세요: "
+            f"mkdir -p {workdir} && cd {workdir} && supabase init && "
+            f"supabase link --project-ref {project_ref}"
+        )
+    if actual != project_ref:
+        raise BatchError(
+            f"링크된 프로젝트가 요청과 다릅니다 — {workdir} → {actual}, 요청 → {project_ref}. "
+            "다시 link 하거나 HAIN7_SUPABASE_WORKDIR 로 올바른 디렉터리를 지정하세요."
+        )
+    return ["--linked", "--workdir", workdir]
 
 
 def list_bucket(project_ref: str, bucket: str) -> list[str]:
     out = run_cli(
         ["storage", "ls", f"ss:///{bucket}/", "--recursive", "--experimental",
-         "--project-ref", project_ref], timeout=120,
+         *linked_flags(project_ref)], timeout=120,
     )
     try:
         return list(json.loads(out).get("paths", []))
@@ -59,7 +81,8 @@ def pull(project_ref: str, bucket: str, mirror: Path) -> dict:
         dest.parent.mkdir(parents=True, exist_ok=True)
         run_cli(["storage", "cp", "-r",
                  f"ss:///{bucket}/{class_id}/{student}/{date}/{session_id}/",
-                 str(dest.parent) + "/", "--experimental", "--project-ref", project_ref], timeout=300)
+                 str(dest.parent) + "/", "--experimental",
+                 *linked_flags(project_ref)], timeout=300)
         problems = verify_manifest(dest)
         if problems:
             inventory["quarantined"].append({**record, "problems": problems})

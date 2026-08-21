@@ -10,10 +10,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import batch_lib as bl  # noqa: E402
 import qa_lint  # noqa: E402
+import merge_sessions as ms  # noqa: E402
 from merge_sessions import merge_student_date  # noqa: E402
 from pull_sessions import parse_session_paths  # noqa: E402
 from render_html import build_html  # noqa: E402
-from run_batch import build_real_context  # noqa: E402
+from run_batch import build_real_context, screen_groups  # noqa: E402
 
 hs = bl.load_signal_module()
 
@@ -59,6 +60,18 @@ class MergeTests(unittest.TestCase):
                 outs.append((out / "events.jsonl").read_text(encoding="utf-8"))
         self.assertEqual(outs[0], outs[1], "세션 생성/전달 순서와 무관하게 병합 결과 동일해야 함")
 
+    def test_span_survives_mixed_offsets_and_bad_stamps(self) -> None:
+        """오프셋이 섞이거나 스탬프 하나가 안 읽힌다고 수업이 1분이 되면 안 된다."""
+        base = [
+            {"ts": "2026-08-19T05:00:00Z", "type": "prompt"},
+            {"ts": "2026-08-19T14:30:00+09:00", "type": "prompt"},   # = 05:30Z
+            {"ts": "2026-08-19T06:00:00", "type": "prompt"},          # bare → UTC
+        ]
+        self.assertEqual(round(ms._span_minutes(base, None)), 60)
+        noisy = base + [{"ts": "yesterday", "type": "prompt"}, {"ts": 1755576000, "type": "prompt"}]
+        self.assertEqual(round(ms._span_minutes(noisy, None)), 60,
+                         "못 읽는 스탬프는 그것만 제외해야 한다")
+
     def test_merge_duration_is_sum_of_spans_not_wallclock(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -75,6 +88,17 @@ class MergeTests(unittest.TestCase):
             d2 = make_session(root, "SK56-BBBBBB-02", "2026-08-21", "s-002", EV2)
             with self.assertRaisesRegex(bl.BatchError, "격리"):
                 merge_student_date([d1, d2], root / "m")
+
+    def test_merge_rejects_non_utf8_bytes(self) -> None:
+        """잘못된 바이트 1개가 배치 전체를 트레이스백으로 죽이면 안 된다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "class-a" / "SK56-AAAAAA-01" / "2026-08-21" / "s1"
+            d.mkdir(parents=True)
+            (d / "session.meta.json").write_text("{}", encoding="utf-8")
+            (d / "events.jsonl").write_bytes(b'{"ts":"2026-08-21T00:00:00Z"}\n\xff\xfe bad\n')
+            with self.assertRaises(bl.BatchError) as ctx:
+                merge_student_date([d], Path(tmp) / "merged")
+            self.assertIn("UTF-8", str(ctx.exception))
 
     def test_merge_rejects_malformed_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -124,6 +148,14 @@ class ContextTests(unittest.TestCase):
     def test_unlisted_student_degrades_to_diagnostic(self) -> None:
         self.assertIsNone(build_real_context(self.CFG, "SK56-X-99", "2026-08-21", 45, "0.1.49"),
                           "명부에 없는 학생은 real 컨텍스트를 받으면 안 됨")
+
+    def test_direct_identifier_handle_is_refused(self) -> None:
+        """가명성은 코드가 확인할 성질이지, 운영자 대신 단언할 사실이 아니다."""
+        cfg = json.loads(json.dumps(self.CFG))
+        for handle in ("김민준 (minjun.kim@example.com)", "minjun.kim@example.com", "Minjun Kim"):
+            cfg["students"] = {handle: {"age": 12, "grade_band": "초등 5-6"}}
+            with self.assertRaises(bl.BatchError, msg=f"{handle} 은 거부되어야 함"):
+                build_real_context(cfg, handle, "2026-08-21", 45, "0.1.49")
 
     def test_missing_consent_degrades_not_fabricates(self) -> None:
         cfg = json.loads(json.dumps(self.CFG))
@@ -216,6 +248,45 @@ class ManifestTests(unittest.TestCase):
     def test_missing_manifest_is_a_problem(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             self.assertTrue(bl.verify_manifest(Path(tmp)))
+
+
+class IntegrityGateTests(unittest.TestCase):
+    """격리는 기록이 아니라 강제다 — 채점 직전에 매 실행 검증한다."""
+
+    def _session(self, root: Path, student: str, date: str, sid: str, tamper: bool) -> Path:
+        d = root / "class-a" / student / date / sid
+        d.mkdir(parents=True)
+        (d / "session.meta.json").write_text("{}", encoding="utf-8")
+        (d / "events.jsonl").write_text('{"ts":"2026-08-21T00:00:00Z","type":"prompt"}\n',
+                                        encoding="utf-8")
+        digest = bl.sha256_file(d / "events.jsonl")
+        if tamper:
+            digest = "0" * 64
+        (d / "manifest.json").write_text(json.dumps(
+            {"files": [{"name": "events.jsonl", "sha256": digest}]}), encoding="utf-8")
+        return d
+
+    def test_tampered_session_is_dropped_before_scoring(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bad = self._session(root, "SK56-AAAAAA-01", "2026-08-21", "s1", tamper=True)
+            good = self._session(root, "SK56-BBBBBB-02", "2026-08-21", "s2", tamper=False)
+            groups = {("SK56-AAAAAA-01", "2026-08-21"): [bad],
+                      ("SK56-BBBBBB-02", "2026-08-21"): [good]}
+            quarantined = screen_groups(groups)
+            self.assertEqual(len(quarantined), 1)
+            self.assertIn("체크섬", " ".join(quarantined[0]["problems"]))
+            self.assertNotIn(("SK56-AAAAAA-01", "2026-08-21"), groups)
+            self.assertEqual(groups[("SK56-BBBBBB-02", "2026-08-21")], [good])
+
+    def test_missing_manifest_session_is_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            d = self._session(root, "SK56-AAAAAA-01", "2026-08-21", "s1", tamper=False)
+            (d / "manifest.json").unlink()
+            groups = {("SK56-AAAAAA-01", "2026-08-21"): [d]}
+            self.assertEqual(len(screen_groups(groups)), 1)
+            self.assertFalse(groups)
 
 
 if __name__ == "__main__":

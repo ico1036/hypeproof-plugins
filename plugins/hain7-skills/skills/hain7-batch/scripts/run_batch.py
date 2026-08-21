@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from batch_lib import (  # noqa: E402
     BatchError, batch_home, default_deploy, grade_band_from_handle, load_signal_module,
-    read_json, write_json,
+    read_json, verify_manifest, write_json,
 )
 from merge_sessions import merge_student_date  # noqa: E402
 from pull_sessions import pull  # noqa: E402
@@ -27,6 +28,8 @@ from qa_lint import lint_analysis, lint_html  # noqa: E402
 from render_html import build_html  # noqa: E402
 
 hs = load_signal_module()
+# hain7_signal 의 auto 경로와 같은 판정 기준을 real 경로에도 적용한다.
+DIRECT_IDENTIFIER = re.compile(r"[\s@]|[\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]")
 
 
 def duration_band(minutes: float) -> str:
@@ -46,6 +49,15 @@ def build_real_context(class_cfg: dict, student: str, date: str, active_minutes:
     entry = (class_cfg.get("students") or {}).get(student)
     if not isinstance(entry, dict):
         return None
+    # 핸들은 버킷의 학생 디렉터리 이름에서 온다. 가명성은 운영자가 기록해 둔 사실이 아니라
+    # 코드가 확인해야 하는 성질인데, 여기서 pseudonymous:true 를 단언하면 hain7_signal 의
+    # 가명 게이트가 real 경로에서만 무력해진다 — 실명·이메일 핸들이 그대로 부모용 PDF 에
+    # 인쇄된다. 대신 단언하지 말고 멈춘다(운영자가 핸들을 교정해야 하는 문제다).
+    if DIRECT_IDENTIFIER.search(student):
+        raise BatchError(
+            f"학습자 핸들 '{student}' 이 직접 식별자로 보입니다(공백·@·한글). "
+            "가명성을 대신 단언하지 않습니다 — 버킷의 학생 디렉터리 이름을 가명 핸들로 교정하세요."
+        )
     privacy_cfg = class_cfg.get("privacy") or {}
     age = entry.get("age")
     grade = entry.get("grade_band") or grade_band_from_handle(student) or class_cfg.get("grade_band")
@@ -78,6 +90,28 @@ def build_real_context(class_cfg: dict, student: str, date: str, active_minutes:
         return context
     except hs.SignalError:
         return None  # 동의/필드 미비 → diagnostic으로 강등 (조작 금지)
+
+
+def screen_groups(groups: dict[tuple[str, str], list[Path]]) -> list[dict]:
+    """Drop sessions whose manifest does not verify, and report them. Integrity is an
+    every-run gate, not a transport-time one: `--no-pull` reprocessing never called it,
+    and a session that pull only *recorded* as quarantined still sits in the mirror where
+    the roster scan picks it up. Both paths reached scoring with unverified bytes."""
+    quarantined: list[dict] = []
+    for key in list(groups):
+        kept: list[Path] = []
+        for d in groups[key]:
+            problems = verify_manifest(d)
+            if problems:
+                quarantined.append({"student": key[0], "date": d.parent.name,
+                                    "session_id": d.name, "path": str(d), "problems": problems})
+            else:
+                kept.append(d)
+        if kept:
+            groups[key] = kept
+        else:
+            del groups[key]
+    return quarantined
 
 
 def process_student(student: str, date: str, session_dirs: list[Path], out_root: Path,
@@ -197,7 +231,16 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             key = (student, "ALL" if args.all_dates else date)
             groups.setdefault(key, []).append(d)
+        seen_paths = {q.get("path") for q in summary["quarantined_sessions"]}
+        summary["quarantined_sessions"].extend(
+            q for q in screen_groups(groups) if q["path"] not in seen_paths)
         if not groups:
+            if summary["quarantined_sessions"]:
+                # 전부 격리된 경우: 이유를 알 수 없는 실패로 끝내지 않고 격리 내역을 남긴다.
+                summary["counts"] = {}
+                write_json(home / "out" / "last-batch-summary.json", summary)
+                print(json.dumps(summary, ensure_ascii=False, indent=1))
+                return 1
             raise BatchError("조건에 맞는 세션이 미러에 없습니다.")
 
         summary["roster"] = sorted({s for s, _ in groups})

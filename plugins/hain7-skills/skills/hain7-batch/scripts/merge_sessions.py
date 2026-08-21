@@ -22,23 +22,32 @@ from batch_lib import BatchError, read_json  # noqa: E402
 
 
 def _span_minutes(events: list[dict], started_at: str | None) -> float:
-    stamps = [e.get("ts") for e in events if e.get("ts")]
+    """실제 경과 시간. 스탬프는 문자열이 아니라 '시점'으로 비교한다.
+
+    문자열로 정렬하면 오프셋 표기가 섞인 세션(+09:00 / Z / 무표기)에서 양끝이 실제
+    최소·최대가 아니고, naive 를 naive 로 두면 aware 와의 뺄셈이 TypeError 로 떨어져
+    수업 전체가 조용히 1분이 된다. 스탬프 하나가 안 읽힌다고 세션을 통째로 버리지도
+    않는다 — 이 값은 보호자 배포 PDF 의 '시간' 과 코호트 duration_band 로 그대로 나간다.
+    """
+    from datetime import datetime, timezone
+
+    raw = [e.get("ts") for e in events if e.get("ts")]
     if started_at:
-        stamps.append(started_at)
-    stamps = sorted(s for s in stamps if isinstance(s, str))
-    if len(stamps) < 2:
-        return 1.0
-    from datetime import datetime
+        raw.append(started_at)
 
-    def parse(t: str):
-        dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=None)
+    moments = []
+    for stamp in raw:
+        if not isinstance(stamp, str):
+            continue
+        try:
+            dt = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        except ValueError:
+            continue  # 못 읽는 스탬프 하나가 세션 전체를 1분으로 붕괴시키지 않는다
+        moments.append(dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc))
 
-    try:
-        a, b = parse(stamps[0]), parse(stamps[-1])
-        return max(1.0, (b - a).total_seconds() / 60)
-    except (ValueError, TypeError):
+    if len(moments) < 2:
         return 1.0
+    return max(1.0, (max(moments) - min(moments)).total_seconds() / 60)
 
 
 def merge_student_date(session_dirs: list[Path], out_dir: Path) -> dict:
@@ -53,7 +62,16 @@ def merge_student_date(session_dirs: list[Path], out_dir: Path) -> dict:
     for d in sorted(session_dirs, key=lambda p: p.name):
         meta = read_json(d / "session.meta.json") if (d / "session.meta.json").exists() else {}
         events: list[dict] = []
-        for line_no, line in enumerate((d / "events.jsonl").read_text(encoding="utf-8").splitlines(), 1):
+        try:
+            body = (d / "events.jsonl").read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise BatchError(f"{d.name}/events.jsonl 없음 — 세션 병합 거부") from exc
+        except UnicodeDecodeError as exc:
+            raise BatchError(
+                f"{d.name}/events.jsonl UTF-8 디코딩 실패(byte {exc.start}, {exc.reason}) "
+                "— 세션 병합 거부"
+            ) from exc
+        for line_no, line in enumerate(body.splitlines(), 1):
             if not line.strip():
                 continue
             try:
